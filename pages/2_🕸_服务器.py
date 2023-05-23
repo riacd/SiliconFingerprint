@@ -26,8 +26,8 @@ with feature_extraction_tab:
 with fuzzy_extraction_tab:
     st.write("# 混淆矩阵图如下")
 
-    image = Image.open('conf_mat.png')
-    st.image(image, caption='Confusion Matrix', use_column_width=True)
+    # image = Image.open('conf_mat.png')
+    # st.image(image, caption='Confusion Matrix', use_column_width=True)
 # # Or even better, call Streamlit functions inside a "with" block:
 # with right_column:
 #     chosen = st.radio(

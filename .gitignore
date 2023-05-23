@@ -1,3 +1,5 @@
 /.git/
 /.idea/
 /VirEnv/
+*/__pycache__/
+/__pycache__/
