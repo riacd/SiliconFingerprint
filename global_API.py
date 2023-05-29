@@ -1,14 +1,21 @@
 # this is for communication between Server & UserEquipment
 import Server.API
 import UserEquipment.API
-from multiprocessing import Process, Queue
-import re
+from multiprocessing import Process
 import json
 from bch_fuzzy_extractor.fuzzyExtractor import FE
 from bch_fuzzy_extractor.converting import converting
 import numpy as np
 import random
-
+import re
+from threading import Thread
+from queue import Queue
+import queue
+from Crypto.PublicKey import RSA
+import Crypto.Signature.PKCS1_v1_5 as sign_PKCS1_v1_5  # 用于签名/验签
+from Crypto.Cipher import PKCS1_v1_5  # 用于加密
+from Crypto import Random
+from Crypto import Hash
 
 
 UE_id_list = [0, 1, 2, 3, 4, 5]
@@ -18,8 +25,8 @@ class UE_database:
     def __init__(self):
         self.data = {}
 
-    def add(self, server_id, server_name, public_key):
-        server = {'server_id': server_id, 'server_name': server_name, 'public_key': public_key}
+    def add(self, server_id, public_key):
+        server = {'server_id': str(server_id), 'public_key': str(public_key)}
         self.data[server_id] = server
 
     def delete(self, server_id):
@@ -33,7 +40,7 @@ class UE_database:
         with open('UserEquipment/client_database.json', 'w') as f:
             json.dump(self.data, f, indent=4)
 
-class UEProcess(Process):
+class UEProcess(Thread):
     def __init__(self, UE_id, Server_list, name=None):
         super(UEProcess, self).__init__()
         self.UE_id = UE_id
@@ -50,10 +57,12 @@ class UEProcess(Process):
         # UE process, use p.start() to run, p.join() to wait for process to finish
         pass
 
-    def sendMsg(self, Server_id, msg):
-        self.Server_list[Server_id].queue.put(msg)
+    def warning(self, type: str, info: str):
+        print('UE'+str(self.UE_id), ': ', type, '(', info, ')')
 
     def logMsg(self, Sent: bool, Msg):
+        if Msg is None:
+            return
         if Sent:
             head = 'Send: '
         else:
@@ -61,20 +70,46 @@ class UEProcess(Process):
         log = head + Msg
         self.Msglog.append(log)
 
-    def register(self, Server_id):
-        Msg = self.register_request(Server_id)
-        self.sendMsg(Server_id, Msg)
-        self.logMsg(True, Msg)
+    def sendMsg(self, Server_id, msg):
+        self.Server_list[Server_id].queue.put(msg)
+        self.logMsg(True, msg)
 
+    def getMsg(self, block, timeout=None):
+        request_msg = self.queue.get(block=block, timeout=timeout)
+        self.logMsg(False, request_msg)
+        return request_msg
 
     def register_request(self, Server_id):
-        tag = 'register_request '
+        tag = 'register_request'
         rawData = np.load("UserEquipment/UE_feature_rawData/feature_clf1.npy")
         row = Server_id*200 + random.randint(0, 199)
         theMedian = np.median(rawData)
         w = converting(rawData[row], theMedian)
-        registerMsg = tag + str(self.UE_id) + ' ' + w
+        registerMsg = tag+' '+str(self.UE_id) + ' ' + w
         return registerMsg
+
+
+    def register(self, Server_id: int):
+        Msg = self.register_request(Server_id)
+        self.sendMsg(Server_id, Msg)
+
+        try:
+            respond_msg = self.getMsg(True, timeout=5)
+        except queue.Empty:
+            respond_msg = None
+        if respond_msg:
+            if re.match('register_respond', respond_msg):
+                tag, public_key = re.split('\S+', respond_msg, maxsplit=1)
+                self.database.add(Server_id, public_key)
+            else:
+                self.warning('register_failure', 'tag unmatch')
+        else:
+            self.warning('register_failure', 'time out')
+
+    def call_register(self, Server_id):
+        self.warning('starting register', 'to '+str(Server_id))
+        t = Thread(target=self.register, args=[Server_id])
+        t.start()
 
 
     def authentication_request(self, Server_id):
@@ -92,9 +127,33 @@ class UEProcess(Process):
         # cipher = Cipher_pkcs1_v1_5.new(public_key)
         # cipher_text = base64.b64encode(cipher.encrypt(challenge.encode('utf-8')))
         #
-        registerMsg = tag+' '+from_id+' '+to_id+' '+ ' ' + w
+        Msg = tag+' '+from_id+' '+to_id+' '+ ' ' + w
 
-        self.sendMsg(Server_id, registerMsg)
+        return Msg
+
+    def authentication(self, Server_id: int):
+        Msg = self.authentication_request(Server_id)
+        self.sendMsg(Server_id, Msg)
+
+        try:
+            respond_msg = self.getMsg(True, timeout=5)
+        except queue.Empty:
+            respond_msg = None
+        if respond_msg:
+            if re.match('authentication_respond', respond_msg):
+                tag, public_key = re.split('\S+', respond_msg, maxsplit=1)
+                self.database.add(Server_id, public_key)
+            else:
+                self.warning('authentication_failure', 'tag unmatch')
+        else:
+            self.warning('authentication_failure', 'time out')
+
+
+    def call_authentication(self, Server_id: int):
+        self.warning('starting authentication', 'to '+str(Server_id))
+        t = Thread(target=self.authentication, args=[Server_id])
+        t.start()
+
 
     def get_respond(self):
         respond_msg = self.queue.get(block=True, timeout=2)
@@ -106,7 +165,11 @@ class Server_database:
         self.load()
 
     def add(self, UE_id, s, x):
-        UE = {'UE_id': UE_id, 's': s, 'x': x}
+        print('UE_id', type(UE_id), UE_id)
+        print('s', type(s), s)
+        print('x', type(x), x)
+
+        UE = {'UE_id': str(UE_id), 's': str(s), 'x': str(x)}
         self.data[UE_id] = UE
 
     def delete(self, server_id):
@@ -121,7 +184,7 @@ class Server_database:
             json.dump(self.data, f, indent=4)
 
 
-class ServerProcess(Process):
+class ServerProcess(Thread):
     def __init__(self, server_id, UE_list, name=None):
         super(ServerProcess, self).__init__()
         self.server_id = server_id
@@ -137,11 +200,13 @@ class ServerProcess(Process):
 
     def run(self):
         # server process, use p.start() to run
+        self.warning('initializing', 'thread start')
         while True:
             self.respond()
 
-    def sendMsg(self, UE_id, msg):
-        self.UE_list[UE_id].queue.put(msg)
+    def warning(self, type: str, info: str):
+        print('UE'+str(self.server_id), ': ', type, '(', info, ')')
+
 
     def logMsg(self, Sent: bool, Msg):
         if Sent:
@@ -151,16 +216,35 @@ class ServerProcess(Process):
         log = head + Msg
         self.Msglog.append(log)
 
+    def sendMsg(self, UE_id, msg):
+        self.UE_list[UE_id].queue.put(msg)
+        self.logMsg(True, msg)
+
+    def getMsg(self, block, timeout=None):
+        request_msg = self.queue.get(block=block, timeout=timeout)
+        self.logMsg(False, request_msg)
+        return request_msg
+
+
     def register_respond(self, request_msg):
-        tag = 'register_respond '
-        UE_id, w1 = re.split('[0123456789]+', request_msg)
+        tag = 'register_respond'
+        register_tag, UE_id_str, w1 = re.split('\W+', request_msg)
+        print(register_tag)
+        UE_id = int(UE_id_str)
+        print(w1)
         R1, s, x = self.FE.generate(w1)
+        print('R1', type(R1), R1)
+        R1_sum = R1.sum()
+        print('R1_sum', type(R1_sum), R1_sum)
+        R1_sum = R1_sum.item()
+        print('R1_sum', type(R1_sum), R1_sum)
         self.database.add(UE_id, s, x)
-        # rsa = RSA.generate(2048, R1)
-        # # private_key = rsa.exportKey()
-        # public_key = rsa.publicKey().exportKey()
-        #
-        # self.sendMsg(UE_id, tag+public_key)
+        random_func = random.seed(R1_sum)
+        rsa = RSA.generate(2048, random_func)
+        # private_key = rsa.exportKey()
+        public_key = rsa.publickey().export_key()
+        self.sendMsg(UE_id, tag+' '+str(public_key))
+        print('finish')
 
     def authentication_respond(self, request_msg):
         tag = 'authentication_respond '
@@ -169,7 +253,7 @@ class ServerProcess(Process):
         # text = cipher.decrypt(base64.b64decode(encrypt_text), random_generator)
 
     def respond(self):
-        request_msg = self.queue.get(block=True)
+        request_msg = self.getMsg(True)
         self.logMsg(False, request_msg)
         if re.match('register_request', request_msg):
             print('Server: processing register_request')
@@ -192,7 +276,7 @@ class ProcessManagement:
     def addServer(self, server_id):
         process = ServerProcess(server_id, self.UE_list)
         self.Server_list[server_id] = process
-        # process.start()
+        process.start()
 
     def addUE(self, UE_id):
         process = UEProcess(UE_id, self.Server_list)

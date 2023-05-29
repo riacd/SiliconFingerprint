@@ -15,7 +15,7 @@ with protocol_tab:
     "用户终端发起的协议请求："
     register, identify = st.columns(2)
     # You can use a column just like st.sidebar:
-    register.button('注册', on_click=global_API.Manager.UE_list[device_id].register, args=[server_id])
+    register.button('注册', on_click=global_API.Manager.UE_list[device_id].call_register, args=[server_id])
     identify.button('认证')
 
     "用户终端当前协议状态："
@@ -27,7 +27,7 @@ with data_tab:
 
 with message_tab:
     "这部分显示协议认证过程消息"
-    st.dataframe(global_API.Manager.UE_list[device_id].Msglog)
+    st.dataframe({'消息记录': global_API.Manager.UE_list[device_id].Msglog})
 
 # # Or even better, call Streamlit functions inside a "with" block:
 # with right_column:
