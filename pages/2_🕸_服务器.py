@@ -8,7 +8,7 @@ st.write("# 模糊提取器")
 st.sidebar.write('配置')
 server_id = st.sidebar.selectbox('服务器ID', global_API.Server_id_list)
 
-protocol_tab, data_tab, message_tab, feature_extraction_tab, fuzzy_extraction_tab= st.tabs(["协议运行", "数据库", "消息记录", "特征提取", "射频指纹提取"])
+protocol_tab, data_tab, message_tab, connection_tab, feature_extraction_tab, fuzzy_extraction_tab= st.tabs(["协议运行", "数据库", "消息记录", "已建立连接表", "特征提取", "射频指纹提取"])
 
 with protocol_tab:
     "服务器端只会被动运行协议，接收到用户终端发送请求后进行处理及消息返回"
@@ -22,6 +22,8 @@ with message_tab:
     "这部分显示协议认证过程消息"
     st.dataframe({'消息记录': global_API.Manager.Server_list[server_id].Msglog})
 
+with connection_tab:
+    st.dataframe({'连接用户终端ID': global_API.Manager.UE_list[server_id].connection_list})
 
 with feature_extraction_tab:
     '这部分显示放深度学习部分相关数据'
